@@ -1,0 +1,151 @@
+import Foundation
+
+/// Accumulates segments from both tracks and writes them out as Markdown plus JSON.
+///
+/// The two tracks arrive interleaved and slightly out of order (each recogniser settles a
+/// ~45s chunk at a time), so segments are sorted by timestamp on every write rather than
+/// appended blindly.
+final class TranscriptWriter {
+    let directory: URL
+    let markdownURL: URL
+    let jsonURL: URL
+
+    private let meeting: DetectedMeeting
+    private let startedAt: Date
+    private var segments: [TranscriptSegment] = []
+    private let lock = NSLock()
+
+    init(meeting: DetectedMeeting, startedAt: Date, root: URL) throws {
+        self.meeting = meeting
+        self.startedAt = startedAt
+
+        let stamp = DateFormatter.folderStamp.string(from: startedAt)
+        let slug = TranscriptWriter.slug(meeting.title)
+        self.directory = root.appendingPathComponent("\(stamp)-\(slug)", isDirectory: true)
+        self.markdownURL = directory.appendingPathComponent("transcript.md")
+        self.jsonURL = directory.appendingPathComponent("transcript.json")
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    func add(_ segment: TranscriptSegment) {
+        lock.lock()
+        segments.append(segment)
+        lock.unlock()
+    }
+
+    var segmentCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return segments.count
+    }
+
+    func save(endedAt: Date, keptAudio: Bool) throws {
+        lock.lock()
+        let ordered = segments.sorted { $0.start < $1.start }
+        lock.unlock()
+
+        try markdown(ordered, endedAt: endedAt, keptAudio: keptAudio)
+            .write(to: markdownURL, atomically: true, encoding: .utf8)
+
+        let payload = TranscriptPayload(
+            title: meeting.title,
+            platform: meeting.platform,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            durationSeconds: endedAt.timeIntervalSince(startedAt),
+            segments: ordered.map {
+                TranscriptPayload.Segment(
+                    start: $0.start, speaker: $0.source.speakerLabel,
+                    source: $0.source.rawValue, text: $0.text
+                )
+            }
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(payload).write(to: jsonURL, options: .atomic)
+    }
+
+    private func markdown(_ ordered: [TranscriptSegment], endedAt: Date, keptAudio: Bool) -> String {
+        var out = "# \(meeting.title)\n\n"
+        out += "- **Platform:** \(meeting.platform)\n"
+        out += "- **Started:** \(DateFormatter.readable.string(from: startedAt))\n"
+        out += "- **Duration:** \(Self.duration(endedAt.timeIntervalSince(startedAt)))\n"
+        if keptAudio {
+            out += "- **Audio:** `microphone.wav`, `system.wav`\n"
+        }
+        out += "\n## Transcript\n\n"
+
+        if ordered.isEmpty {
+            out += "_No speech was recognised in this recording._\n"
+            return out
+        }
+
+        // Collapse consecutive lines from the same speaker into one paragraph.
+        var lastSpeaker: String?
+        for segment in ordered {
+            let speaker = segment.source.speakerLabel
+            if speaker != lastSpeaker {
+                out += "\n**\(Self.timestamp(segment.start)) — \(speaker)**\n\n"
+                lastSpeaker = speaker
+            }
+            out += "\(segment.text)\n"
+        }
+        return out
+    }
+
+    static func timestamp(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%02d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+    }
+
+    static func duration(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let hours = total / 3600, minutes = (total % 3600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m \(total % 60)s"
+    }
+
+    static func slug(_ title: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        let collapsed = title
+            .replacingOccurrences(of: " ", with: "-")
+            .unicodeScalars
+            .map { allowed.contains($0) ? Character($0) : "-" }
+        let slug = String(collapsed)
+            .replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            .lowercased()
+        let trimmed = String(slug.prefix(60))
+        return trimmed.isEmpty ? "meeting" : trimmed
+    }
+}
+
+private struct TranscriptPayload: Encodable {
+    struct Segment: Encodable {
+        let start: TimeInterval
+        let speaker: String
+        let source: String
+        let text: String
+    }
+    let title: String
+    let platform: String
+    let startedAt: Date
+    let endedAt: Date
+    let durationSeconds: TimeInterval
+    let segments: [Segment]
+}
+
+extension DateFormatter {
+    static let folderStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+        return formatter
+    }()
+
+    static let readable: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
