@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>MeetingScribe</string>
 	<key>CFBundleExecutable</key>
 	<string>MeetingScribe</string>
 	<key>CFBundleIdentifier</key>
@@ -12,27 +14,25 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>MeetingScribe</string>
-	<key>CFBundleDisplayName</key>
-	<string>MeetingScribe</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.0</string>
+	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>MeetingScribe reads your calendar to title each transcript with the real meeting name instead of a window title.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>MeetingScribe reads your calendar to title each transcript with the real meeting name instead of a window title.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MeetingScribe records your microphone so your own speech appears in the meeting transcript.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>MeetingScribe converts meeting audio to text using on-device speech recognition.</string>
-	<key>NSCalendarsUsageDescription</key>
-	<string>MeetingScribe reads your calendar to title each transcript with the real meeting name instead of a window title.</string>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>MeetingScribe reads your calendar to title each transcript with the real meeting name instead of a window title.</string>
 </dict>
 </plist>

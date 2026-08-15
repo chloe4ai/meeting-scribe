@@ -9,6 +9,7 @@ final class TranscriptWriter {
     let directory: URL
     let markdownURL: URL
     let jsonURL: URL
+    let vttURL: URL
 
     private let meeting: DetectedMeeting
     private let calendar: CalendarMatch?
@@ -26,6 +27,7 @@ final class TranscriptWriter {
         self.directory = root.appendingPathComponent("\(stamp)-\(slug)", isDirectory: true)
         self.markdownURL = directory.appendingPathComponent("transcript.md")
         self.jsonURL = directory.appendingPathComponent("transcript.json")
+        self.vttURL = directory.appendingPathComponent("transcript.vtt")
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
@@ -46,12 +48,13 @@ final class TranscriptWriter {
 
     /// `inProgress` marks the periodic snapshot written during recording, so a transcript
     /// recovered from a crashed session is not mistaken for a complete one.
-    func save(endedAt: Date, keptAudio: Bool, inProgress: Bool = false) throws {
+    func save(endedAt: Date, keptAudio: Bool, audioExtension: String = "wav", inProgress: Bool = false) throws {
         lock.lock()
         let ordered = segments.sorted { $0.start < $1.start }
         lock.unlock()
 
-        try markdown(ordered, endedAt: endedAt, keptAudio: keptAudio, inProgress: inProgress)
+        try markdown(ordered, endedAt: endedAt, keptAudio: keptAudio,
+                     audioExtension: audioExtension, inProgress: inProgress)
             .write(to: markdownURL, atomically: true, encoding: .utf8)
 
         let payload = TranscriptPayload(
@@ -75,10 +78,39 @@ final class TranscriptWriter {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(payload).write(to: jsonURL, options: .atomic)
+
+        try Self.webVTT(ordered).write(to: vttURL, atomically: true, encoding: .utf8)
+    }
+
+    /// WebVTT so the transcript can be played back against the archived audio.
+    ///
+    /// The recogniser gives a start time per line but no end time, so each cue runs until
+    /// the next one starts; the last is given a length estimated from its word count.
+    static func webVTT(_ ordered: [TranscriptSegment]) -> String {
+        var out = "WEBVTT\n\n"
+        for (index, segment) in ordered.enumerated() {
+            let next = index + 1 < ordered.count ? ordered[index + 1].start : nil
+            let estimated = max(2.0, Double(segment.text.split(separator: " ").count) * 0.4)
+            let end = max(segment.start + 0.5, next ?? segment.start + estimated)
+
+            out += "\(vttTimestamp(segment.start)) --> \(vttTimestamp(end))\n"
+            out += "<v \(segment.source.speakerLabel)>\(segment.text)\n\n"
+        }
+        return out
+    }
+
+    static func vttTimestamp(_ seconds: TimeInterval) -> String {
+        let clamped = max(0, seconds)
+        let hours = Int(clamped) / 3600
+        let minutes = (Int(clamped) % 3600) / 60
+        let secs = Int(clamped) % 60
+        let millis = Int((clamped - floor(clamped)) * 1000)
+        return String(format: "%02d:%02d:%02d.%03d", hours, minutes, secs, millis)
     }
 
     private func markdown(
-        _ ordered: [TranscriptSegment], endedAt: Date, keptAudio: Bool, inProgress: Bool
+        _ ordered: [TranscriptSegment], endedAt: Date, keptAudio: Bool,
+        audioExtension: String, inProgress: Bool
     ) -> String {
         var out = "# \(displayTitle)\n\n"
         if inProgress {
@@ -94,7 +126,7 @@ final class TranscriptWriter {
             out += "- **Invited:** \(attendees.joined(separator: ", "))\n"
         }
         if keptAudio {
-            out += "- **Audio:** `microphone.wav`, `system.wav`\n"
+            out += "- **Audio:** `microphone.\(audioExtension)`, `system.\(audioExtension)`\n"
         }
 
         let followUps = ActionItems.extract(from: ordered)

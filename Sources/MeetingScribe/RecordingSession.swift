@@ -30,9 +30,10 @@ final class RecordingSession: NSObject, AudioCaptureDelegate {
         )
         super.init()
 
+        let locale = SpeechLocales.resolve(settings.speechLocaleIdentifier)
         for source in [AudioSource.microphone, .system] {
             let transcriber = try AppleSpeechTranscriber(
-                source: source, allowServerFallback: settings.allowServerFallback
+                source: source, locale: locale, allowServerFallback: settings.allowServerFallback
             )
             transcriber.onSegment = { [weak self] segment in self?.writer.add(segment) }
             tracks[source] = try AudioTrack(source: source, directory: writer.directory, transcriber: transcriber)
@@ -74,12 +75,23 @@ final class RecordingSession: NSObject, AudioCaptureDelegate {
             await track.finish()
         }
 
-        if !settings.keepAudio {
+        var audioExtension = "wav"
+        if settings.keepAudio {
+            if settings.compressAudio {
+                // Recording ran to WAV so a crash would leave repairable audio; now that the
+                // meeting ended cleanly, trade that for roughly a tenth of the disk space.
+                var allCompressed = true
+                for track in tracks.values {
+                    if await AudioArchive.compressToM4A(track.audioURL) == nil { allCompressed = false }
+                }
+                if allCompressed { audioExtension = "m4a" }
+            }
+        } else {
             for track in tracks.values { track.discardAudio() }
         }
 
         do {
-            try writer.save(endedAt: Date(), keptAudio: settings.keepAudio)
+            try writer.save(endedAt: Date(), keptAudio: settings.keepAudio, audioExtension: audioExtension)
         } catch {
             NSLog("MeetingScribe: failed to write transcript — \(error.localizedDescription)")
         }

@@ -33,9 +33,25 @@ records who was invited. The event is picked by a scoring heuristic that prefers
 already in progress, with attendees, and with a conference link attached. Access is
 optional; without it everything falls back to the window title.
 
+**Languages.** Transcription runs in whichever language you pick from the menu, restricted
+to those with an on-device model installed. `Locale.current` is the wrong default for
+anyone who works in more than one language — a Mac set to English transcribes a Mandarin
+call into confident nonsense. Meeting detection is localized too: a Zoom client running in
+Chinese titles its window 会议, and matching only on "meeting" would silently never record.
+
 **Durability.** The transcript is rewritten to disk every 30 seconds while recording, so a
 crash or forced quit mid-meeting leaves a usable file rather than nothing. Snapshots carry
 a "recording in progress" banner that the final write clears.
+
+If the app died mid-meeting, the next launch repairs what it left behind. `AVAudioFile`
+only stamps the real chunk lengths into a WAV header when it closes, so a killed process
+leaves a file whose header claims zero bytes — every sample is still on disk, but players
+trust the header and hear silence. Startup rewrites those lengths from the actual file
+size and re-labels the transcript as interrupted rather than in-progress.
+
+**Disk.** Recording goes to WAV, because raw PCM survives a crash. Once a meeting ends
+cleanly the tracks are transcoded to M4A, which takes roughly 230 MB/hour down to about
+15 MB/hour. Turn it off to keep the WAVs.
 
 ## Output
 
@@ -45,8 +61,9 @@ Each meeting gets a folder in `~/Documents/MeetingScribe/`:
 2026-08-13-1402-weekly-sync/
 ├── transcript.md       # readable, grouped by speaker
 ├── transcript.json     # per-line timestamps, for scripting
-├── microphone.wav      # 16 kHz mono, ~7 MB/hour
-└── system.wav
+├── transcript.vtt      # WebVTT, to play against the audio
+├── microphone.m4a      # 16 kHz mono
+└── system.m4a
 ```
 
 ```markdown
@@ -133,6 +150,12 @@ caches the denial for the lifetime of the process.
   frames written rather than wall time, the paused stretch is absent from the timeline
   instead of showing up as a long silence.
 - **Recent Transcripts** — the last eight, opening straight to `transcript.md`.
+- **Search Transcripts…** (⌘F) — full-text across every saved meeting. All terms must
+  match; `"quote a phrase"` to match it exactly. Double-click a row to open the transcript.
+- **Transcription Language** — only languages with an on-device model installed are
+  offered, and picking one without a model tells you so instead of failing at the start of
+  your next meeting.
+- **Compress audio when done** — transcode to M4A after the meeting ends.
 - **Auto-record meetings** — the detector described above. Off means manual only.
 - **Notify when recording starts** — a notification each time recording begins. See below.
 - **Keep audio files** — off deletes the WAVs once the transcript is written.
@@ -160,8 +183,11 @@ consent from anyone else on the call. Tell people you're recording.
 - Browser calls are detected by window title, so a browser that hides tab titles from
   ScreenCaptureKit won't be detected.
 - Follow-ups are keyword matches, not a summary. Expect both misses and false positives.
-- Up to 30 seconds of transcript can be lost in a hard crash, between autosaves. The WAVs
-  on disk stay playable regardless.
+- Up to 30 seconds of transcript can be lost in a hard crash, between autosaves. The audio
+  itself is recoverable — startup repairs the header — so nothing spoken is lost.
+- One language per recording. A call that switches between languages transcribes only the
+  selected one well.
+- Search is substring matching, not stemming or fuzzy matching: "meeting" won't find "meet".
 
 ## License
 

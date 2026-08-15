@@ -10,6 +10,8 @@ final class Settings {
         static let keepAudio = "keepAudio"
         static let allowServerFallback = "allowServerFallback"
         static let useCalendarTitles = "useCalendarTitles"
+        static let compressAudio = "compressAudio"
+        static let speechLocale = "speechLocale"
         static let transcriptFolder = "transcriptFolder"
     }
 
@@ -22,7 +24,22 @@ final class Settings {
             Key.keepAudio: true,
             Key.allowServerFallback: false,
             Key.useCalendarTitles: true,
+            Key.compressAudio: true,
         ])
+    }
+
+    /// Convert the archived WAVs to M4A once the meeting ends, cutting roughly 230 MB/hour
+    /// down to ~15 MB/hour. Recording still happens to WAV so a crash leaves recoverable
+    /// audio; the compression is the last step.
+    var compressAudio: Bool {
+        get { defaults.bool(forKey: Key.compressAudio) }
+        set { defaults.set(newValue, forKey: Key.compressAudio) }
+    }
+
+    /// Empty means "follow the system locale".
+    var speechLocaleIdentifier: String? {
+        get { defaults.string(forKey: Key.speechLocale) }
+        set { defaults.set(newValue, forKey: Key.speechLocale) }
     }
 
     /// Title transcripts from the matching calendar event instead of the window title,

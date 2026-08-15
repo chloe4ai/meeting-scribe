@@ -139,21 +139,42 @@ final class MeetingDetector {
         return nil
     }
 
+    /// Clients localise their window titles, and a client running in Chinese titles its
+    /// meeting window 会议 — matching only on "meeting" silently never records.
+    static let meetingWords = [
+        "meeting", "webinar", "call",
+        "会议", "會議", "研讨会", "研討會", "通话", "通話",   // zh-Hans / zh-Hant
+        "会議", "ミーティング", "通話",                        // ja
+        "회의",                                              // ko
+        "reunión", "reunion", "llamada",                     // es
+        "réunion", "reunião", "appel",                       // fr / pt
+        "besprechung", "sitzung", "anruf",                   // de
+        "riunione", "vergadering", "møte", "möte",           // it / nl / no / sv
+        "встреча", "созвон",                                 // ru
+    ]
+
+    static let huddleWords = ["huddle", "小队会议", "哈德尔"]
+    static let voiceWords = ["voice", "语音", "語音", "ボイス"]
+
+    private static func containsAny(_ title: String, _ words: [String]) -> Bool {
+        words.contains { title.localizedCaseInsensitiveContains($0) }
+    }
+
     /// Zoom and Teams keep background windows open all day, so their mere presence means nothing.
     static func nativeWindowLooksLikeMeeting(bundleID: String, title: String) -> Bool {
         if bundleID.hasPrefix("us.zoom") {
-            return title.localizedCaseInsensitiveContains("zoom meeting")
-                || title.localizedCaseInsensitiveContains("zoom webinar")
+            // Zoom's launcher window is titled just "Zoom", so require a meeting word —
+            // but the window is often "Zoom Meeting" / "Zoom 会议" / bare "会议".
+            return containsAny(title, meetingWords)
         }
         if bundleID.hasPrefix("com.microsoft.teams") {
-            return title.localizedCaseInsensitiveContains("meeting")
-                || title.localizedCaseInsensitiveContains("call")
+            return containsAny(title, meetingWords)
         }
         if bundleID == "com.tinyspeck.slackmacgap" {
-            return title.localizedCaseInsensitiveContains("huddle")
+            return containsAny(title, huddleWords)
         }
         if bundleID == "com.hnc.Discord" {
-            return title.localizedCaseInsensitiveContains("voice")
+            return containsAny(title, voiceWords)
         }
         return true
     }
@@ -165,7 +186,9 @@ final class MeetingDetector {
             || lower.contains("meet.google.com") {
             return "Google Meet"
         }
-        if lower.contains("zoom meeting") || lower.hasPrefix("launch meeting - zoom") {
+        // Zoom's web client localises its tab title, so pair the brand with any meeting word
+        // rather than matching the English phrase alone.
+        if lower.contains("zoom"), containsAny(title, meetingWords) {
             return "Zoom"
         }
         if lower.contains("microsoft teams") { return "Microsoft Teams" }

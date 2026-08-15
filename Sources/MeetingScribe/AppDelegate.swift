@@ -18,10 +18,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let notifyItem = NSMenuItem(title: "Notify when recording starts", action: #selector(toggleNotify), keyEquivalent: "")
     private let keepAudioItem = NSMenuItem(title: "Keep audio files", action: #selector(toggleKeepAudio), keyEquivalent: "")
     private let calendarItem = NSMenuItem(title: "Use calendar event titles", action: #selector(toggleCalendar), keyEquivalent: "")
+    private let compressItem = NSMenuItem(title: "Compress audio when done", action: #selector(toggleCompress), keyEquivalent: "")
+    private let languageItem = NSMenuItem(title: "Transcription Language", action: nil, keyEquivalent: "")
+    private lazy var searchController = SearchWindowController(root: { [weak self] in
+        self?.settings.transcriptRoot ?? Settings.shared.transcriptRoot
+    })
     private let launchAtLoginItem = NSMenuItem(title: "Launch at login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildStatusItem()
+        recoverInterruptedSessions()
 
         detector.onStart = { [weak self] meeting in
             guard let self, self.session == nil, self.settings.autoRecord else { return }
@@ -84,12 +90,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         recentMenuItem.submenu = NSMenu()
         menu.addItem(recentMenuItem)
+
+        let searchItem = NSMenuItem(title: "Search Transcripts…", action: #selector(openSearch), keyEquivalent: "f")
+        searchItem.target = self
+        menu.addItem(searchItem)
         menu.addItem(.separator())
 
-        for item in [autoRecordItem, notifyItem, keepAudioItem, calendarItem, launchAtLoginItem] {
+        for item in [autoRecordItem, notifyItem, keepAudioItem, compressItem, calendarItem, launchAtLoginItem] {
             item.target = self
             menu.addItem(item)
         }
+        languageItem.submenu = NSMenu()
+        menu.addItem(languageItem)
         menu.addItem(.separator())
 
         let privacyItem = NSMenuItem(title: "Privacy Settings…", action: #selector(openPrivacySettings), keyEquivalent: "")
@@ -107,7 +119,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Rebuild the dynamic parts only when the menu is actually opened.
     func menuWillOpen(_ menu: NSMenu) {
         rebuildRecentTranscripts()
+        rebuildLanguageMenu()
         refreshUI()
+    }
+
+    private func rebuildLanguageMenu() {
+        let submenu = NSMenu()
+
+        let systemItem = NSMenuItem(title: "Follow system (\(SpeechLocales.displayName(for: Locale.current)))",
+                                    action: #selector(selectLanguage(_:)), keyEquivalent: "")
+        systemItem.target = self
+        systemItem.representedObject = ""
+        systemItem.state = (settings.speechLocaleIdentifier ?? "").isEmpty ? .on : .off
+        submenu.addItem(systemItem)
+        submenu.addItem(.separator())
+
+        let options = SpeechLocales.onDeviceOptions()
+        if options.isEmpty {
+            let empty = NSMenuItem(title: "No on-device languages installed", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            submenu.addItem(empty)
+        } else {
+            for option in options {
+                let item = NSMenuItem(title: option.displayName, action: #selector(selectLanguage(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = option.identifier
+                item.state = settings.speechLocaleIdentifier == option.identifier ? .on : .off
+                submenu.addItem(item)
+            }
+        }
+
+        languageItem.submenu = submenu
     }
 
     private func rebuildRecentTranscripts() {
@@ -156,6 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoRecordItem.state = settings.autoRecord ? .on : .off
         notifyItem.state = settings.notifyOnStart ? .on : .off
         keepAudioItem.state = settings.keepAudio ? .on : .off
+        compressItem.state = settings.compressAudio ? .on : .off
+        compressItem.isEnabled = settings.keepAudio
         calendarItem.state = settings.useCalendarTitles ? .on : .off
         launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
 
@@ -250,6 +294,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Repairs anything a previous crash left half-written, before recording again.
+    private func recoverInterruptedSessions() {
+        let root = settings.transcriptRoot
+        DispatchQueue.global(qos: .utility).async {
+            let result = SessionRecovery.run(root: root)
+            guard result.transcriptsRecovered > 0 else { return }
+            DispatchQueue.main.async {
+                Notifier.post(
+                    title: "Recovered an interrupted recording",
+                    body: "\(result.transcriptsRecovered) transcript(s) restored, "
+                        + "\(result.audioFilesRepaired) audio file(s) repaired."
+                )
+            }
+        }
+    }
+
     /// Flushes the transcript periodically so a crash mid-meeting doesn't lose it.
     /// Kept synchronous: scheduling a timer from an async context trips Sendable checking.
     private func startSnapshotTimer() {
@@ -299,6 +359,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleKeepAudio() {
         settings.keepAudio.toggle()
+        refreshUI()
+    }
+
+    @objc private func openSearch() {
+        searchController.show()
+    }
+
+    @objc private func toggleCompress() {
+        settings.compressAudio.toggle()
+        refreshUI()
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        let identifier = (sender.representedObject as? String) ?? ""
+
+        if !identifier.isEmpty {
+            let locale = Locale(identifier: identifier)
+            // Refuse a language whose model isn't installed rather than failing at the
+            // start of the next meeting, when it is too late to notice.
+            guard SpeechLocales.supportsOnDevice(locale) || settings.allowServerFallback else {
+                presentMessage(
+                    "\(SpeechLocales.displayName(for: locale)) has no on-device speech model "
+                    + "installed. Add it under System Settings › General › Language & Region, "
+                    + "then pick it here again."
+                )
+                return
+            }
+        }
+
+        settings.speechLocaleIdentifier = identifier
+        rebuildLanguageMenu()
         refreshUI()
     }
 
