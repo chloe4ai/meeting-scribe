@@ -9,6 +9,7 @@ final class Settings {
         static let notifyOnStart = "notifyOnStart"
         static let keepAudio = "keepAudio"
         static let allowServerFallback = "allowServerFallback"
+        static let useCalendarTitles = "useCalendarTitles"
         static let transcriptFolder = "transcriptFolder"
     }
 
@@ -20,7 +21,15 @@ final class Settings {
             Key.notifyOnStart: true,
             Key.keepAudio: true,
             Key.allowServerFallback: false,
+            Key.useCalendarTitles: true,
         ])
+    }
+
+    /// Title transcripts from the matching calendar event instead of the window title,
+    /// and record who was invited. Falls back silently when access is not granted.
+    var useCalendarTitles: Bool {
+        get { defaults.bool(forKey: Key.useCalendarTitles) }
+        set { defaults.set(newValue, forKey: Key.useCalendarTitles) }
     }
 
     /// Watch for Zoom/Meet/Teams windows and start recording without being asked.

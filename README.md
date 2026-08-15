@@ -27,6 +27,16 @@ after about a minute, so MeetingScribe rotates through short-lived recognition t
 replacement request is opened before the outgoing one is closed, so nothing is lost at the
 seam. Results are split into sentence-sized lines that carry their own timestamps.
 
+**Titles.** Window titles are often useless — Google Meet gives you `Meet - abc-defg-hij`.
+If you grant calendar access, the transcript is titled from the matching event instead and
+records who was invited. The event is picked by a scoring heuristic that prefers one
+already in progress, with attendees, and with a conference link attached. Access is
+optional; without it everything falls back to the window title.
+
+**Durability.** The transcript is rewritten to disk every 30 seconds while recording, so a
+crash or forced quit mid-meeting leaves a usable file rather than nothing. Snapshots carry
+a "recording in progress" banner that the final write clears.
+
 ## Output
 
 Each meeting gets a folder in `~/Documents/MeetingScribe/`:
@@ -40,11 +50,19 @@ Each meeting gets a folder in `~/Documents/MeetingScribe/`:
 ```
 
 ```markdown
-# Weekly Sync
+# Q3 Roadmap Review
 
 - **Platform:** Google Meet
 - **Started:** Aug 13, 2026 at 2:02 PM
 - **Duration:** 47m
+- **Organizer:** Dana Reyes
+- **Invited:** Dana Reyes, Sam Okafor
+
+## Possible follow-ups
+
+_Keyword matches, not a summary — check the timestamp for real context._
+
+- `00:04:12` **You:** I'll send over the revised deck tomorrow morning.
 
 ## Transcript
 
@@ -56,6 +74,10 @@ Let's start with the roadmap.
 
 Sounds good to me.
 ```
+
+The follow-ups section is a keyword match over the transcript, not a summary — there is no
+language model in this app, and pretending otherwise would produce confident nonsense.
+Treat it as an index into the recording. It only appears when something matches.
 
 Turn off "Keep audio files" in the menu if you only want the text.
 
@@ -86,11 +108,15 @@ cd meeting-scribe && ./scripts/build-app.sh && open dist/MeetingScribe.app
 
 macOS asks for three things on first run. All are required:
 
-| Permission | Why | Where |
+| Permission | Why | Required |
 | --- | --- | --- |
-| Screen Recording | ScreenCaptureKit's audio tap and window detection both live behind it | Privacy & Security › Screen & System Audio Recording |
-| Microphone | Records your side of the call | Privacy & Security › Microphone |
-| Speech Recognition | On-device transcription | Privacy & Security › Speech Recognition |
+| Screen Recording | ScreenCaptureKit's audio tap and window detection both live behind it | Yes |
+| Microphone | Records your side of the call | Yes |
+| Speech Recognition | On-device transcription | Yes |
+| Calendars | Real meeting titles and attendee lists | Optional |
+
+All four live under System Settings › Privacy & Security. The menu's **Privacy Settings…**
+item opens the Screen Recording pane directly.
 
 Screen Recording sounds heavier than it is: the video stream is configured at 2×2 pixels
 and one frame per second, and the frames are discarded on arrival. It's the only route
@@ -99,14 +125,23 @@ macOS offers to system audio without a kernel-level driver.
 If the menu reads "Screen Recording permission needed", grant it and relaunch — macOS
 caches the denial for the lifetime of the process.
 
-## Menu options
+## Menu
 
+- **Start / Stop Recording** — manual override. A manual recording is never stopped by the
+  detector, so it keeps running even with no meeting window on screen.
+- **Pause / Resume** — drops buffers while paused. Because the transcript clock counts
+  frames written rather than wall time, the paused stretch is absent from the timeline
+  instead of showing up as a long silence.
+- **Recent Transcripts** — the last eight, opening straight to `transcript.md`.
 - **Auto-record meetings** — the detector described above. Off means manual only.
 - **Notify when recording starts** — a notification each time recording begins. See below.
 - **Keep audio files** — off deletes the WAVs once the transcript is written.
+- **Use calendar event titles** — prompts for calendar access the first time.
+- **Launch at login** — registers via `SMAppService`. macOS only accepts login items from a
+  stable location, so move the app to `/Applications` first.
 
 The menu-bar icon shows a filled record symbol and a `REC` label the entire time it is
-recording, whether or not notifications are enabled.
+recording (`‖` when paused), whether or not notifications are enabled.
 
 ## Consent
 
@@ -124,8 +159,9 @@ consent from anyone else on the call. Tell people you're recording.
   whisper.cpp or cloud backend can be dropped in without touching the capture pipeline.
 - Browser calls are detected by window title, so a browser that hides tab titles from
   ScreenCaptureKit won't be detected.
-- The transcript is written when recording stops. A hard crash mid-meeting loses the text,
-  though the WAVs on disk remain playable.
+- Follow-ups are keyword matches, not a summary. Expect both misses and false positives.
+- Up to 30 seconds of transcript can be lost in a hard crash, between autosaves. The WAVs
+  on disk stay playable regardless.
 
 ## License
 

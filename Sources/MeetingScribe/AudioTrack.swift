@@ -17,6 +17,7 @@ final class AudioTrack {
     private var inputFormat: AVAudioFormat?
     private var file: AVAudioFile?
     private var framesWritten: AVAudioFramePosition = 0
+    private var paused = false
     private let lock = NSLock()
 
     init(source: AudioSource, directory: URL, transcriber: TranscriptionBackend) throws {
@@ -47,7 +48,21 @@ final class AudioTrack {
         return Double(framesWritten) / targetFormat.sampleRate
     }
 
+    /// While paused, buffers are dropped rather than written. Because the transcript clock
+    /// is derived from frames written, the paused stretch is simply absent from the
+    /// timeline instead of appearing as a long silence.
+    func setPaused(_ value: Bool) {
+        lock.lock()
+        paused = value
+        lock.unlock()
+    }
+
     func accept(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        let isPaused = paused
+        lock.unlock()
+        guard !isPaused else { return }
+
         guard let converted = convert(buffer) else { return }
 
         lock.lock()

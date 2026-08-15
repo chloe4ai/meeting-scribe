@@ -5,6 +5,8 @@ import Foundation
 final class RecordingSession: NSObject, AudioCaptureDelegate {
     let meeting: DetectedMeeting
     let startedAt: Date
+    /// Started from the menu rather than by the detector, so the detector must not stop it.
+    let isManual: Bool
 
     /// Reported on the main queue when the capture stream dies unexpectedly.
     var onFailure: ((Error) -> Void)?
@@ -12,11 +14,20 @@ final class RecordingSession: NSObject, AudioCaptureDelegate {
     private let capture = AudioCapture()
     private let writer: TranscriptWriter
     private var tracks: [AudioSource: AudioTrack] = [:]
+    private let settings: Settings
 
-    init(meeting: DetectedMeeting, settings: Settings = .shared) throws {
+    private(set) var isPaused = false
+
+    init(meeting: DetectedMeeting, isManual: Bool, settings: Settings = .shared) throws {
         self.meeting = meeting
+        self.isManual = isManual
         self.startedAt = Date()
-        self.writer = try TranscriptWriter(meeting: meeting, startedAt: startedAt, root: settings.transcriptRoot)
+        self.settings = settings
+
+        let calendarMatch = settings.useCalendarTitles ? CalendarLookup.match() : nil
+        self.writer = try TranscriptWriter(
+            meeting: meeting, calendar: calendarMatch, startedAt: startedAt, root: settings.transcriptRoot
+        )
         super.init()
 
         for source in [AudioSource.microphone, .system] {
@@ -33,14 +44,30 @@ final class RecordingSession: NSObject, AudioCaptureDelegate {
     var elapsed: TimeInterval { Date().timeIntervalSince(startedAt) }
     var segmentCount: Int { writer.segmentCount }
     var transcriptDirectory: URL { writer.directory }
+    var title: String { writer.displayTitle }
 
     func start() async throws {
         try await capture.start()
     }
 
+    func setPaused(_ paused: Bool) {
+        isPaused = paused
+        for track in tracks.values { track.setPaused(paused) }
+    }
+
+    /// Periodic snapshot so a crash or forced quit mid-meeting still leaves a transcript.
+    /// Driven by the app delegate's timer, which owns all the main-thread scheduling.
+    func writeSnapshot() {
+        do {
+            try writer.save(endedAt: Date(), keptAudio: settings.keepAudio, inProgress: true)
+        } catch {
+            NSLog("MeetingScribe: snapshot failed — \(error.localizedDescription)")
+        }
+    }
+
     /// Stops capture, drains both recognisers, and writes the transcript to disk.
     @discardableResult
-    func stop(settings: Settings = .shared) async -> URL {
+    func stop() async -> URL {
         await capture.stop()
 
         for track in tracks.values {
