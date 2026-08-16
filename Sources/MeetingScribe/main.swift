@@ -5,14 +5,18 @@ import AppKit
 // TCC grants apply:
 //     /Applications/MeetingScribe.app/Contents/MacOS/MeetingScribe --self-test
 if CommandLine.arguments.contains("--self-test") {
-    let semaphore = DispatchSemaphore(value: 0)
-    var exitCode: Int32 = 1
+    let state = SelfTestRunState()
     Task {
-        exitCode = await SelfTest.run()
-        semaphore.signal()
+        let code = await SelfTest.run()
+        state.finish(code)
     }
-    semaphore.wait()
-    exit(exitCode)
+    // Spin the run loop rather than blocking on a semaphore: SFSpeechRecognizer delivers
+    // its results through the main queue, so a blocked main thread means the recognition
+    // handler never fires and the test sees an empty transcript.
+    while !state.isDone {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(state.exitCode)
 }
 
 let application = NSApplication.shared

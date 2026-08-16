@@ -14,6 +14,30 @@ import Speech
 ///
 /// It runs inside the app bundle deliberately: TCC grants are keyed to the bundle's code
 /// signature, so a loose binary would see a different, unauthorised identity.
+/// Lets `main.swift` poll for completion from the run loop without blocking it.
+final class SelfTestRunState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    private var code: Int32 = 1
+
+    var isDone: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return done
+    }
+
+    var exitCode: Int32 {
+        lock.lock(); defer { lock.unlock() }
+        return code
+    }
+
+    func finish(_ value: Int32) {
+        lock.lock()
+        code = value
+        done = true
+        lock.unlock()
+    }
+}
+
 enum SelfTest {
 
     /// Report lines are also written here, because the useful way to invoke this is through
