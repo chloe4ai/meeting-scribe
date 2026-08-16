@@ -159,13 +159,13 @@ final class AppleSpeechTranscriber: TranscriptionBackend {
         }
     }
 
+    /// Delivered on the recogniser's own queue, not the main queue: the only consumer is
+    /// the transcript writer, which is already lock-protected, and hopping to main would
+    /// mean segments are silently dropped anywhere the main run loop isn't spinning.
     private func emit(_ result: SFSpeechRecognitionResult, from unit: Unit) {
         let lines = Self.sentences(from: result, offsetBy: unit.startOffset, source: source)
         guard !lines.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            for line in lines { self.onSegment?(line) }
-        }
+        for line in lines { onSegment?(line) }
     }
 
     /// Splits a result into sentence-sized lines carrying their own timestamps. Without this

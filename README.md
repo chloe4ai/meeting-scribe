@@ -135,6 +135,30 @@ macOS asks for three things on first run. All are required:
 All four live under System Settings › Privacy & Security. The menu's **Privacy Settings…**
 item opens the Screen Recording pane directly.
 
+> **After every update, re-grant Screen Recording and Microphone.** macOS ties permission
+> grants to an app's code signature. This build is ad-hoc signed rather than notarized, so
+> a new version is a different app as far as TCC is concerned and silently starts with no
+> permissions. The symptom is a recording that runs happily and produces an empty
+> transcript — which is exactly what `--self-test` is for.
+
+### Checking that it actually works
+
+```bash
+open -a /Applications/MeetingScribe.app --args --self-test
+```
+
+It reports every permission, whether the selected language has an on-device model, and
+then synthesises a phrase and pushes it through the real resampler and recogniser to prove
+transcription end to end. The report is printed and written to
+`~/Library/Logs/MeetingScribe-selftest.txt`.
+
+Launch it through `open` rather than running the binary directly: a binary started from a
+shell has its privacy requests attributed to the parent terminal, which has no speech
+usage description, and macOS kills the process before it can report anything.
+
+If a recording runs for two minutes with nothing transcribed, the app notifies you rather
+than letting you find out afterwards.
+
 Screen Recording sounds heavier than it is: the video stream is configured at 2×2 pixels
 and one frame per second, and the frames are discarded on arrival. It's the only route
 macOS offers to system audio without a kernel-level driver.
@@ -188,6 +212,9 @@ consent from anyone else on the call. Tell people you're recording.
 - One language per recording. A call that switches between languages transcribes only the
   selected one well.
 - Search is substring matching, not stemming or fuzzy matching: "meeting" won't find "meet".
+- About 26 ms of audio is left in the resampler at the very end of a recording and never
+  flushed. Across a stream the pipeline retains 99.5% of its input; the loss is a fixed
+  tail, not a per-buffer drop.
 
 ## License
 

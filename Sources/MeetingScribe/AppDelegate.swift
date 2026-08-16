@@ -1,5 +1,9 @@
 import AppKit
 
+/// Main-actor isolated on purpose. Without it, the `Task { }` blocks below run on the
+/// generic executor, and every `refreshUI`/`setIcon`/`NSAlert` call inside them touches
+/// AppKit from a background thread.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let detector = MeetingDetector()
@@ -7,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var session: RecordingSession?
     private var isBusy = false
+    private var hasWarnedNoSpeech = false
     private var tickTimer: Timer?
     private var snapshotTimer: Timer?
 
@@ -51,20 +56,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             detector.start()
         }
 
+        // Timers fire on the main run loop, so asserting main-actor isolation is safe.
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.refreshUI()
+            MainActor.assumeIsolated { self?.refreshUI() }
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        guard session != nil else { return }
-        // Finish the transcript rather than losing the meeting on quit.
-        let semaphore = DispatchSemaphore(value: 0)
+    /// Finish the transcript rather than losing the meeting on quit.
+    ///
+    /// This has to be `.terminateLater` rather than blocking in `applicationWillTerminate`:
+    /// the shutdown work needs the main actor, so a semaphore wait on the main thread would
+    /// deadlock until its timeout and then lose the recording anyway.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard session != nil else { return .terminateNow }
         Task {
             await endRecording(reason: "Quit")
-            semaphore.signal()
+            NSApp.reply(toApplicationShouldTerminate: true)
         }
-        _ = semaphore.wait(timeout: .now() + 15)
+        return .terminateLater
     }
 
     // MARK: - Menu
@@ -204,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
 
         if let session {
+            warnIfSilent(session)
             let state = session.isPaused ? "Paused" : "Recording"
             statusMenuItem.title = "\(state): \(session.title) — \(TranscriptWriter.duration(session.elapsed))"
             toggleMenuItem.title = "Stop Recording"
@@ -243,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             try await session.start()
             self.session = session
+            hasWarnedNoSpeech = false
             setIcon(recording: true)
 
             startSnapshotTimer()
@@ -294,6 +305,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// A misconfigured language or a missing model produces a recording that runs happily
+    /// and yields an empty transcript. Say so while the meeting is still happening, rather
+    /// than letting it be discovered afterwards.
+    private func warnIfSilent(_ session: RecordingSession) {
+        guard !hasWarnedNoSpeech, !session.isPaused,
+              session.elapsed > 120, session.segmentCount == 0 else { return }
+        hasWarnedNoSpeech = true
+
+        let language = SpeechLocales.displayName(for: SpeechLocales.resolve(settings.speechLocaleIdentifier))
+        Notifier.post(
+            title: "No speech recognised yet",
+            body: "Two minutes in with nothing transcribed. Check that \(language) is the "
+                + "right language, or run the app's --self-test."
+        )
+    }
+
     /// Repairs anything a previous crash left half-written, before recording again.
     private func recoverInterruptedSessions() {
         let root = settings.transcriptRoot
@@ -315,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startSnapshotTimer() {
         snapshotTimer?.invalidate()
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.session?.writeSnapshot()
+            MainActor.assumeIsolated { self?.session?.writeSnapshot() }
         }
     }
 

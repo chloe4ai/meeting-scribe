@@ -1,20 +1,58 @@
 import AVFoundation
 
+/// Resamples whatever the capture hands us down to 16 kHz mono.
+///
+/// That is the format the speech recogniser wants, and it cuts the archived audio from
+/// ~1.4 GB/hour to ~115 MB/hour per track. Extracted from `AudioTrack` so the self-test
+/// can push audio through the exact same conversion the live pipeline uses.
+final class AudioResampler {
+    static let targetFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+    )!
+
+    private var converter: AVAudioConverter?
+    private var inputFormat: AVAudioFormat?
+
+    func convert(_ input: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        let target = Self.targetFormat
+
+        if converter == nil || inputFormat != input.format {
+            converter = AVAudioConverter(from: input.format, to: target)
+            converter?.downmix = true   // sum both channels instead of keeping only the left
+            inputFormat = input.format
+        }
+        guard let converter else { return nil }
+
+        let ratio = target.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 1024
+        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return nil }
+
+        var consumed = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            outStatus.pointee = .haveData
+            return input
+        }
+
+        guard status != .error, output.frameLength > 0 else { return nil }
+        return output
+    }
+}
+
 /// One recorded track (mic or system): resamples incoming buffers, archives them to disk,
 /// and feeds the transcriber.
-///
-/// Everything downstream runs at 16 kHz mono, which is what the speech recogniser wants
-/// anyway and cuts the archived audio from ~1.4 GB/hour to ~115 MB/hour per track.
 final class AudioTrack {
     let source: AudioSource
     let audioURL: URL
 
-    private let targetFormat = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
-    )!
+    private let targetFormat = AudioResampler.targetFormat
     private let transcriber: TranscriptionBackend
-    private var converter: AVAudioConverter?
-    private var inputFormat: AVAudioFormat?
+    private let resampler = AudioResampler()
     private var file: AVAudioFile?
     private var framesWritten: AVAudioFramePosition = 0
     private var paused = false
@@ -63,7 +101,7 @@ final class AudioTrack {
         lock.unlock()
         guard !isPaused else { return }
 
-        guard let converted = convert(buffer) else { return }
+        guard let converted = resampler.convert(buffer) else { return }
 
         lock.lock()
         let offset = Double(framesWritten) / targetFormat.sampleRate
@@ -91,31 +129,4 @@ final class AudioTrack {
         try? FileManager.default.removeItem(at: audioURL)
     }
 
-    private func convert(_ input: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        if converter == nil || inputFormat != input.format {
-            converter = AVAudioConverter(from: input.format, to: targetFormat)
-            converter?.downmix = true   // sum both channels instead of keeping only the left
-            inputFormat = input.format
-        }
-        guard let converter else { return nil }
-
-        let ratio = targetFormat.sampleRate / input.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 1024
-        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return nil }
-
-        var consumed = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, outStatus in
-            if consumed {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            outStatus.pointee = .haveData
-            return input
-        }
-
-        guard status != .error, output.frameLength > 0 else { return nil }
-        return output
-    }
 }

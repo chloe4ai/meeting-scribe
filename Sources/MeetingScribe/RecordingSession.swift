@@ -15,6 +15,7 @@ final class RecordingSession: NSObject, AudioCaptureDelegate {
     private let writer: TranscriptWriter
     private var tracks: [AudioSource: AudioTrack] = [:]
     private let settings: Settings
+    private let snapshotQueue = DispatchQueue(label: "com.chloetan.meetingscribe.snapshot", qos: .utility)
 
     private(set) var isPaused = false
 
@@ -57,12 +58,16 @@ final class RecordingSession: NSObject, AudioCaptureDelegate {
     }
 
     /// Periodic snapshot so a crash or forced quit mid-meeting still leaves a transcript.
-    /// Driven by the app delegate's timer, which owns all the main-thread scheduling.
+    /// Driven by the app delegate's timer, but the file writing itself is pushed off the
+    /// main thread — a long meeting's transcript is not something to serialise in the UI.
     func writeSnapshot() {
-        do {
-            try writer.save(endedAt: Date(), keptAudio: settings.keepAudio, inProgress: true)
-        } catch {
-            NSLog("MeetingScribe: snapshot failed — \(error.localizedDescription)")
+        snapshotQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                try self.writer.save(endedAt: Date(), keptAudio: self.settings.keepAudio, inProgress: true)
+            } catch {
+                NSLog("MeetingScribe: snapshot failed — \(error.localizedDescription)")
+            }
         }
     }
 
