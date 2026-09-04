@@ -1,70 +1,33 @@
 # MeetingScribe
 
-A macOS menu-bar app that notices when you're in a Zoom, Google Meet, Teams, Webex, or
-Slack huddle call, records it, and writes a timestamped transcript to disk.
+**The hard part of recording a meeting is not the transcription — it is everyone else on the call.**
 
-Everything runs locally. Audio never leaves the machine.
+A macOS menu-bar app that notices when you are in a Zoom, Google Meet, Teams, Webex or Slack huddle call, records it, and writes a timestamped transcript to disk. Everything runs on the machine — no server, no account, no virtual audio driver, no audio leaving the laptop.
 
-## How it works
+---
 
-**Detection.** A background poll checks two signals every five seconds: whether a meeting
-window is on screen (native clients by bundle ID, browser calls by tab title) and whether
-the default input device is actually hot. Both must hold for ~10 seconds before recording
-starts, so a meeting link you merely opened won't trigger it. Recording stops after ~30
-seconds without a meeting window, so a page reload doesn't cut the transcript in half.
+## The product argument
 
-**Capture.** Audio comes from ScreenCaptureKit, which taps the system mix and the
-microphone directly — there is **no virtual audio driver to install** (no BlackHole, no
-Loopback, no admin password).
+**1. On-device, because the alternative makes a decision on other people's behalf.**
+A cloud recorder buys real diarization and better accuracy on hard audio, and pays for it by putting colleagues' voices on a third party's servers — a choice you make for them, usually without telling them. MeetingScribe takes the worse model on purpose: ScreenCaptureKit taps the system mix and microphone directly (**no BlackHole, no Loopback, no admin password**) and transcription is `SFSpeechRecognizer` in on-device mode. Screen Recording sounds heavier than it is — the video stream runs at **2×2 pixels, 1 fps** and every frame is discarded on arrival. It is the only route macOS offers to system audio without a kernel driver.
 
-**Speaker separation.** The system track and the mic track are captured and transcribed
-separately, so the transcript distinguishes **You** from **Participants** without needing
-a diarization model. It won't tell two participants apart — for that you'd want a cloud
-service with real diarization.
+**2. Consent is a product surface, not a disclaimer.**
+California, Florida, Pennsylvania, Washington, Illinois and several other states require **every** party to consent; most of the EU is stricter. So the app refuses to let you confuse two things: **"Notify when recording starts" notifies *you*, and is not consent from anyone else on the call.** The recording state is also not hideable — the menu-bar icon carries a filled record symbol and a `REC` label the whole time it runs (`‖` when paused), notifications on or off. Tell people you are recording; software cannot do that part for you.
 
-**Transcription.** Apple's `SFSpeechRecognizer` in on-device mode. It stops on its own
-after about a minute, so MeetingScribe rotates through short-lived recognition tasks: the
-replacement request is opened before the outgoing one is closed, so nothing is lost at the
-seam. Results are split into sentence-sized lines that carry their own timestamps.
+**3. Auto-detect with asymmetric hysteresis, and a manual override the detector can never cancel.**
+A poll checks two signals every **5 seconds**: a meeting window on screen (native clients by bundle ID, browser calls by tab title), and the default input device actually hot. Both must hold for **two consecutive polls (~10 s)** to start; it takes **six consecutive misses (~30 s)** to stop. The asymmetry is the design: a false start records a meeting link you merely opened, while a false stop cuts a transcript in half on a page reload. Detection is localized — a Zoom client in Chinese titles its window 会议.
 
-**Titles.** Window titles are often useless — Google Meet gives you `Meet - abc-defg-hij`.
-If you grant calendar access, the transcript is titled from the matching event instead and
-records who was invited. The event is picked by a scoring heuristic that prefers one
-already in progress, with attendees, and with a conference link attached. Access is
-optional; without it everything falls back to the window title.
+**4. Two tracks instead of diarization — an honest ceiling, stated.**
+System track and mic track are captured and transcribed separately, so the transcript separates **You** from **Participants** with no model at all. It will not tell two participants apart, and naming that beats shipping a speaker label that is wrong a third of the time.
 
-**Languages.** Transcription runs in whichever language you pick from the menu, restricted
-to those with an on-device model installed. `Locale.current` is the wrong default for
-anyone who works in more than one language — a Mac set to English transcribes a Mandarin
-call into confident nonsense. Meeting detection is localized too: a Zoom client running in
-Chinese titles its window 会议, and matching only on "meeting" would silently never record.
+**5. The follow-ups section is a keyword index, and is labelled as one.**
+There is no language model in this app, and pretending otherwise would produce confident nonsense. `ActionItems` matches about thirty commitment cues ("I'll", "can you", "by Friday") on lines of **5–60 words**, capped at **12** — shorter lines are fragments, longer ones are the recogniser missing a sentence boundary. Every line keeps its timestamp and the heading reads *Possible follow-ups*: an index, not a summary.
 
-**Durability.** The transcript is rewritten to disk every 30 seconds while recording, so a
-crash or forced quit mid-meeting leaves a usable file rather than nothing. Snapshots carry
-a "recording in progress" banner that the final write clears.
-
-If the app died mid-meeting, the next launch repairs what it left behind. `AVAudioFile`
-only stamps the real chunk lengths into a WAV header when it closes, so a killed process
-leaves a file whose header claims zero bytes — every sample is still on disk, but players
-trust the header and hear silence. Startup rewrites those lengths from the actual file
-size and re-labels the transcript as interrupted rather than in-progress.
-
-**Disk.** Recording goes to WAV, because raw PCM survives a crash. Once a meeting ends
-cleanly the tracks are transcoded to M4A, which takes roughly 230 MB/hour down to about
-15 MB/hour. Turn it off to keep the WAVs.
+---
 
 ## Output
 
-Each meeting gets a folder in `~/Documents/MeetingScribe/`:
-
-```
-2026-08-13-1402-weekly-sync/
-├── transcript.md       # readable, grouped by speaker
-├── transcript.json     # per-line timestamps, for scripting
-├── transcript.vtt      # WebVTT, to play against the audio
-├── microphone.m4a      # 16 kHz mono
-└── system.m4a
-```
+Each meeting gets a folder in `~/Documents/MeetingScribe/`: `transcript.md`, `transcript.json` (per-line timestamps), `transcript.vtt`, and `microphone.m4a` / `system.m4a` at 16 kHz mono.
 
 ```markdown
 # Q3 Roadmap Review
@@ -92,129 +55,44 @@ Let's start with the roadmap.
 Sounds good to me.
 ```
 
-The follow-ups section is a keyword match over the transcript, not a summary — there is no
-language model in this app, and pretending otherwise would produce confident nonsense.
-Treat it as an index into the recording. It only appears when something matches.
+That title comes from your calendar, because window titles are useless — Google Meet gives you `Meet - abc-defg-hij`. Access is optional; the event is picked by a heuristic preferring one already in progress, with attendees and a conference link.
 
-Turn off "Keep audio files" in the menu if you only want the text.
+Recording goes to WAV because raw PCM survives a crash; the transcript is rewritten every **30 seconds**, and startup repairs the WAV header a killed process left claiming zero bytes. On a clean end the tracks transcode to M4A — **230 MB/hour down to about 15**.
 
 ## Install
 
-Download `MeetingScribe.zip` from the [latest release](../../releases/latest), unzip, and
-drag `MeetingScribe.app` to `/Applications`.
-
-The build is ad-hoc signed rather than notarized, so the first launch needs:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/MeetingScribe.app
-```
-
-Then open it. It lives in the menu bar with no Dock icon.
-
-### Build from source
-
-Requires macOS 15+ and Xcode 16+ (or Command Line Tools, though `swift test` needs full
-Xcode for XCTest).
+Download `MeetingScribe.zip` from the [latest release](../../releases/latest), unzip, drag the app to `/Applications`. It is ad-hoc signed rather than notarized, so first launch needs `xattr -dr com.apple.quarantine /Applications/MeetingScribe.app`. From source (macOS 15+, Xcode 16+):
 
 ```bash
 git clone https://github.com/chloe4ai/meeting-scribe.git
 cd meeting-scribe && ./scripts/build-app.sh && open dist/MeetingScribe.app
 ```
 
-## Permissions
+**Permissions** (System Settings › Privacy & Security; the menu's *Privacy Settings…* opens the pane): Screen Recording, Microphone, Speech Recognition required, Calendars optional.
 
-macOS asks for three things on first run. All are required:
-
-| Permission | Why | Required |
-| --- | --- | --- |
-| Screen Recording | ScreenCaptureKit's audio tap and window detection both live behind it | Yes |
-| Microphone | Records your side of the call | Yes |
-| Speech Recognition | On-device transcription | Yes |
-| Calendars | Real meeting titles and attendee lists | Optional |
-
-All four live under System Settings › Privacy & Security. The menu's **Privacy Settings…**
-item opens the Screen Recording pane directly.
-
-> **After every update, re-grant Screen Recording and Microphone.** macOS ties permission
-> grants to an app's code signature. This build is ad-hoc signed rather than notarized, so
-> a new version is a different app as far as TCC is concerned and silently starts with no
-> permissions. The symptom is a recording that runs happily and produces an empty
-> transcript — which is exactly what `--self-test` is for.
-
-### Checking that it actually works
+> **Re-grant Screen Recording and Microphone after every update.** macOS ties grants to a code signature, so each ad-hoc signed build is a new app to TCC and starts silently unpermissioned. The symptom is a recording that produces an empty transcript — which is what the self-test catches:
 
 ```bash
 open -a /Applications/MeetingScribe.app --args --self-test
 ```
 
-It reports every permission, whether the selected language has an on-device model, and
-then synthesises a phrase and pushes it through the real resampler and recogniser to prove
-transcription end to end. The report is printed and written to
-`~/Library/Logs/MeetingScribe-selftest.txt`.
+It checks every permission, then pushes a synthesised phrase through the real resampler and recogniser (`~/Library/Logs/MeetingScribe-selftest.txt`). Use `open`, not the binary — a shell-started binary attributes privacy requests to the terminal, which has no speech usage description, and macOS kills it.
 
-Launch it through `open` rather than running the binary directly: a binary started from a
-shell has its privacy requests attributed to the parent terminal, which has no speech
-usage description, and macOS kills the process before it can report anything.
+The menu holds start/stop, pause/resume, the last eight transcripts, ⌘F search, transcription language, and toggles for auto-record, compression, notifications, audio retention, calendar titles and launch-at-login.
 
-If a recording runs for two minutes with nothing transcribed, the app notifies you rather
-than letting you find out afterwards.
+## Known limits
 
-Screen Recording sounds heavier than it is: the video stream is configured at 2×2 pixels
-and one frame per second, and the frames are discarded on arrival. It's the only route
-macOS offers to system audio without a kernel-level driver.
+- **macOS 15+ only** (`SCStreamConfiguration.captureMicrophone` is 15.0).
+- **Accuracy is Apple's on-device model** — weaker on accents, crosstalk and jargon. There is no WER number here because I have not run one. `TranscriptionBackend` is a protocol, so a whisper.cpp or cloud backend drops in without touching capture.
+- **One language per recording.** `Locale.current` is the wrong default for anyone bilingual — a Mac set to English transcribes a Mandarin call into confident nonsense — so it is an explicit choice. A call that switches mid-way still transcribes only one side well.
+- **Browser calls are detected by window title**, so a browser hiding tab titles from ScreenCaptureKit is invisible; search is substring, not stemming.
+- **Up to 30 seconds of transcript** can be lost in a hard crash between autosaves (the audio is recoverable), and a fixed **~26 ms** tail stays in the resampler at the end of each recording — 99.5% of input retained, not a per-buffer drop.
 
-If the menu reads "Screen Recording permission needed", grant it and relaunch — macOS
-caches the denial for the lifetime of the process.
+## What I'd build next
 
-## Menu
-
-- **Start / Stop Recording** — manual override. A manual recording is never stopped by the
-  detector, so it keeps running even with no meeting window on screen.
-- **Pause / Resume** — drops buffers while paused. Because the transcript clock counts
-  frames written rather than wall time, the paused stretch is absent from the timeline
-  instead of showing up as a long silence.
-- **Recent Transcripts** — the last eight, opening straight to `transcript.md`.
-- **Search Transcripts…** (⌘F) — full-text across every saved meeting. All terms must
-  match; `"quote a phrase"` to match it exactly. Double-click a row to open the transcript.
-- **Transcription Language** — only languages with an on-device model installed are
-  offered, and picking one without a model tells you so instead of failing at the start of
-  your next meeting.
-- **Compress audio when done** — transcode to M4A after the meeting ends.
-- **Auto-record meetings** — the detector described above. Off means manual only.
-- **Notify when recording starts** — a notification each time recording begins. See below.
-- **Keep audio files** — off deletes the WAVs once the transcript is written.
-- **Use calendar event titles** — prompts for calendar access the first time.
-- **Launch at login** — registers via `SMAppService`. macOS only accepts login items from a
-  stable location, so move the app to `/Applications` first.
-
-The menu-bar icon shows a filled record symbol and a `REC` label the entire time it is
-recording (`‖` when paused), whether or not notifications are enabled.
-
-## Consent
-
-Recording a call is not the same as being allowed to. California, Florida, Pennsylvania,
-Washington, Illinois and several other states require **every** party to consent; most of
-the EU is stricter still. "Notify when recording starts" only notifies *you* — it is not
-consent from anyone else on the call. Tell people you're recording.
-
-## Limitations
-
-- macOS 15+ only (`SCStreamConfiguration.captureMicrophone` is 15.0).
-- Doesn't separate individual participants — only you versus everyone else.
-- Accuracy is Apple's on-device model: good on clear speech, weaker on heavy accents,
-  crosstalk, and technical vocabulary. `TranscriptionBackend` is a protocol, so a
-  whisper.cpp or cloud backend can be dropped in without touching the capture pipeline.
-- Browser calls are detected by window title, so a browser that hides tab titles from
-  ScreenCaptureKit won't be detected.
-- Follow-ups are keyword matches, not a summary. Expect both misses and false positives.
-- Up to 30 seconds of transcript can be lost in a hard crash, between autosaves. The audio
-  itself is recoverable — startup repairs the header — so nothing spoken is lost.
-- One language per recording. A call that switches between languages transcribes only the
-  selected one well.
-- Search is substring matching, not stemming or fuzzy matching: "meeting" won't find "meet".
-- About 26 ms of audio is left in the resampler at the very end of a recording and never
-  flushed. Across a stream the pipeline retains 99.5% of its input; the loss is a fixed
-  tail, not a per-buffer drop.
+- **A WER harness** over held-out call audio, per language and acoustic condition, so "swap in whisper.cpp" becomes a measured decision rather than an assumed upgrade.
+- **Precision and recall on follow-ups.** Hand-label commitments in a dozen transcripts and score the cue list against them; that number decides whether the section belongs above the transcript.
+- **A consent prompt at record time**, plus a count of how often it is dismissed — a compliance affordance nobody uses is not one.
 
 ## License
 
