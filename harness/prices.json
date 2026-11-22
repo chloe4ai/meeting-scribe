@@ -1,0 +1,13 @@
+{
+  "_source": "Anthropic first-party list prices, USD per 1M tokens, as of 2026-11. Edit when prices change.",
+  "_note": "Cache writes are priced as input x multiplier. Haiku 5.5 cache_read assumes the usual 0.1x of input; Haiku 5.5 prompts over 100K tokens cost more than listed here.",
+  "baseline_model": "claude-opus-5-5",
+  "models": {
+    "claude-opus-5-5":   {"input": 4.00, "output": 20.00, "cache_read": 0.20},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_read": 0.10},
+    "claude-haiku-5-5":  {"input": 0.10, "output": 0.50,  "cache_read": 0.01},
+    "claude-fable-5-2":  {"input": 8.00, "output": 40.00, "cache_read": 0.20}
+  },
+  "family_fallback": {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5", "fable": "claude-fable-5-2"},
+  "cache_write_multiplier": {"5m": 1.25, "1h": 2.0}
+}
