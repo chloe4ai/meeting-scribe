@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/harness/bin/harness.py\" gate",
+            "timeout": 1800
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "ask": [
+      "mcp__Gmail__send_message",
+      "mcp__Gmail__forward",
+      "Bash(git push --force:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}

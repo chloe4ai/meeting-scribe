@@ -4,3 +4,7 @@ dist/
 .DS_Store
 .swiftpm/
 Package.resolved
+
+# harness runs are local state; remove these lines to keep receipts in git as an audit trail
+harness/current
+harness/runs/
