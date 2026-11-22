@@ -126,6 +126,7 @@ class HarnessTest(unittest.TestCase):
         self.assertNotIn("decision", out)
         self.assertIn("done", out["systemMessage"])
         self.assertEqual(self.run_json()["state"], "done")
+        self.assertEqual(self.run_json()["round"], 3)  # three stops evaluated
         self.assertTrue((self.root / "harness" / "current" / "report.md").exists())
 
         # A finished run no longer holds the stop.

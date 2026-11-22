@@ -72,6 +72,34 @@ python3 harness/bin/harness.py cost                   # cost by seat so far
 | `../.claude/commands/` | `/goal`, `/run`, `/audit` |
 | `../.claude/settings.json` | The Stop hook and the ask-first permissions |
 
+## A measured run
+
+A small task on a scratch repo (add `slugify()` and `truncate()` to a text module, 4 checks),
+run headless with `/run`, 2026-11-22:
+
+| seat | model | cost | same tokens on Opus |
+|---|---|---:|---:|
+| orchestrator | Opus | $0.47 | $0.47 |
+| advisor | Opus | $0.22 | $0.22 |
+| verifier | Opus | $0.22 | $0.22 |
+| builder ×2 | Sonnet | $0.10 | $0.19 |
+| scout | Haiku | $0.01 | $0.54 |
+| **total** | | **$1.02** | **$1.65** (38% saved) |
+
+The harness's total for the first leg matched Claude Code's own reported cost to the cent.
+
+What happened along the way:
+- The advisor wrote three cards. Two (confidence 0.90 and 0.85) passed the verifier first try.
+- The third was a check that could never pass: C1's command was wrong as written. The advisor
+  rated that card 0.20, which routed it to the human with two options, and the run paused
+  instead of widening its own scope. After the human picked an option, the verifier issued the
+  last receipt and the Stop hook closed the run.
+- The verifier flagged C4 as the weakest check: it counts test names, so an empty test would pass.
+  The checker found a hole in the checks.
+
+The orchestrator is now the largest line; starting the main session on a cheaper model is the
+next lever to measure.
+
 ## Why these choices
 
 - **A deterministic gate instead of a judge model.** The original pattern this adapts uses a

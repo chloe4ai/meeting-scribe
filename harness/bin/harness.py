@@ -470,6 +470,7 @@ def cmd_gate(args) -> int:
     if not run or run.get("state") != "running":
         return 0
     results = evaluate()
+    run["round"] += 1  # every gate evaluation closes a round
     done = [r for r in results if r["passed"] and r["receipt"]]
     if len(done) == len(results):
         run["state"], run["finished"] = "done", iso()
@@ -481,7 +482,6 @@ def cmd_gate(args) -> int:
                                            f"Run {run['id']} done in {run['round']} rounds. "
                                            f"Report: harness/current/report.md"}))
         return 0
-    run["round"] += 1
     if run["round"] >= run["max_rounds"]:
         run["state"] = "paused"
         run["pause_reason"] = f"hit max_rounds ({run['max_rounds']}) with {len(done)}/{len(results)} checks done"
